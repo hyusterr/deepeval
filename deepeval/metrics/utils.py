@@ -50,9 +50,18 @@ def check_llm_test_case_params(
 def trimAndLoadJson(
     input_string: str, metric: Optional[BaseMetric] = None
 ) -> Any:
+    input_string = input_string.split("[/INST]")[-1].replace("'", "")
+    # print(input_string)
     start = input_string.find("{")
-    end = input_string.rfind("}") + 1
+    end = input_string.find("}") + 1
     jsonStr = input_string[start:end] if start != -1 and end != 0 else ""
+    print(input_string)
+    print(start, end, jsonStr)
+    # occured exception example:
+    # 1. LLM generate 2 JSON, end = input_string.rfind("}") + 1 will get the wrong JSON format since it contains 2 JSON
+    # 2. LLM generate 1 JSON but the " and ' are not properly formatted, e.g. "' + "' ocourred
+    # some warings:
+    # 1. sometimes LLM will generate the reason even the verdict is "yes" (which do not require a reason in the original prompt)
 
     try:
         return json.loads(jsonStr)
@@ -60,7 +69,8 @@ def trimAndLoadJson(
         error_str = "Evaluation LLM outputted an invalid JSON. Please use a better evaluation model."
         if metric is not None:
             metric.error = error_str
-        raise ValueError(error_str)
+        # raise ValueError(error_str)
+        return {"verdict": "error", "reason": error_str}
     except Exception as e:
         raise Exception(f"An unexpected error occurred: {str(e)}")
 

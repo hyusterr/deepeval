@@ -26,7 +26,7 @@ Reason:
 
     @staticmethod
     def generate_verdict(text, context):
-        return f"""Based on the input and context, please generate a JSON object to indicate whether the context is relevant to the provided input. The JSON will have 1 mandatory field: 'verdict', and 1 optional field: 'reason'.
+        return f"""[INST]Based on the input and context, please generate a JSON object to indicate whether the context is relevant to the provided input. The JSON will have 1 mandatory field: 'verdict', and 1 optional field: 'reason'.
 The 'verdict' key should STRICTLY be either 'yes' or 'no', and states whether the context is relevant to the input. 
 Provide a 'reason' ONLY IF verdict is no. You MUST quote the irrelevant parts of the context to back up your reason.
 
@@ -41,6 +41,7 @@ Example:
     "reason": "Although the context contains information about Einstein winning the Nobel Prize, it irrelevantly includes 'There was a cat' when it has nothing to do with Einstein's achievements."
 }}
 **
+[/INST]
 
 Input:
 {text}
