@@ -55,8 +55,8 @@ def trimAndLoadJson(
     start = input_string.find("{")
     end = input_string.find("}") + 1
     jsonStr = input_string[start:end] if start != -1 and end != 0 else ""
-    print(input_string)
-    print(start, end, jsonStr)
+    # print(input_string)
+    # print(start, end, jsonStr)
     # occured exception example:
     # 1. LLM generate 2 JSON, end = input_string.rfind("}") + 1 will get the wrong JSON format since it contains 2 JSON
     # 2. LLM generate 1 JSON but the " and ' are not properly formatted, e.g. "' + "' ocourred
