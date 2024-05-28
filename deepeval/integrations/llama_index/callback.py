@@ -35,10 +35,16 @@ from deepeval.tracing import (
     LlmTrace,
     GenericTrace,
     EmbeddingTrace,
+    RerankingTrace,
+    RetrieverTrace,
     TraceStatus,
     LlmMetadata,
     EmbeddingMetadata,
+    RerankingMetadata,
+    RetrieverMetadata,
     TraceType,
+    TraceProvider,
+    LlamaIndexTraceType,
 )
 from deepeval.utils import dataclass_to_dict
 
@@ -72,7 +78,7 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
 
     def start_trace(self, trace_id: Optional[str] = None) -> None:
         self.event_map = {}
-        trace_manager.clear_trace_stack()
+        # trace_manager.clear_trace_stack()
         return
 
     def end_trace(
@@ -90,7 +96,6 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
         parent_id: str = "",
         **kwargs: Any,
     ) -> str:
-
         processed_payload = self.process_payload(
             event_type, event_id, parent_id, payload, True
         )
@@ -118,11 +123,13 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
         trace_instance = self.update_trace_instance(
             trace_instance, event_type, processed_payload
         )
-        current_trace_stack = trace_manager.get_trace_stack()
+        current_trace_stack = trace_manager.get_trace_stack_copy()
+        # trace_instance = current_trace_stack[-1]
 
         if len(current_trace_stack) > 1:
             parent_trace = current_trace_stack[-2]
             parent_trace.traces.append(trace_instance)
+            trace_manager.set_trace_stack(current_trace_stack)
 
         if len(current_trace_stack) == 1:
             dict_representation = dataclass_to_dict(current_trace_stack[0])
@@ -141,11 +148,12 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
 
         current_time = perf_counter()
         type = self.convert_event_type_to_deepeval_trace_type(event_type)
-        name = event_type.capitalize()
+        name = event_type
         trace_instance_input = None
 
         if "exception" in processed_payload:
             trace_instance = GenericTrace(
+                traceProvider=TraceProvider.LLAMA_INDEX,
                 type=type,
                 executionTime=current_time,
                 name=name,
@@ -157,6 +165,7 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
 
         elif event_type == CBEventType.LLM:
             trace_instance = LlmTrace(
+                traceProvider=TraceProvider.LLAMA_INDEX,
                 type=type,
                 executionTime=current_time,
                 name=name,
@@ -166,13 +175,10 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
                 traces=[],
                 llmMetadata=LlmMetadata(
                     model=processed_payload["llm_model_name"],
-                    hyperparameters=processed_payload["llm_hyperparameters"],
                     outputMessages=None,
                     tokenCount=None,
-                    llmPromptTemplate=processed_payload.get(
-                        "llm_prompt_template"
-                    ),
-                    llmPromptTemplateVariables=processed_payload.get(
+                    promptTemplate=processed_payload.get("llm_prompt_template"),
+                    promptTemplateVariables=processed_payload.get(
                         "llm_prompt_template_variables"
                     ),
                 ),
@@ -180,6 +186,7 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
 
         elif event_type == CBEventType.EMBEDDING:
             trace_instance = EmbeddingTrace(
+                traceProvider=TraceProvider.LLAMA_INDEX,
                 type=type,
                 executionTime=current_time,
                 name=name,
@@ -193,7 +200,8 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
             )
 
         elif event_type == CBEventType.RETRIEVE:
-            trace_instance = GenericTrace(
+            trace_instance = RetrieverTrace(
+                traceProvider=TraceProvider.LLAMA_INDEX,
                 type=type,
                 executionTime=current_time,
                 name=name,
@@ -201,10 +209,28 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
                 output=None,
                 status=TraceStatus.SUCCESS,
                 traces=[],
+                retrieverMetadata=RetrieverMetadata(),
+            )
+
+        elif event_type == CBEventType.RERANKING:
+            trace_instance = RerankingTrace(
+                traceProvider=TraceProvider.LLAMA_INDEX,
+                type=type,
+                executionTime=current_time,
+                name=name,
+                input=processed_payload["input_value"],
+                output=None,
+                status=TraceStatus.SUCCESS,
+                traces=[],
+                rerankingMetadata=RerankingMetadata(
+                    model=processed_payload["reranker_model_name"],
+                    topK=processed_payload["reranker_top_k"],
+                ),
             )
 
         elif event_type == CBEventType.QUERY:
             trace_instance = GenericTrace(
+                traceProvider=TraceProvider.LLAMA_INDEX,
                 type=type,
                 executionTime=current_time,
                 name=name,
@@ -216,6 +242,7 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
 
         elif event_type == CBEventType.SYNTHESIZE:
             trace_instance = GenericTrace(
+                traceProvider=TraceProvider.LLAMA_INDEX,
                 type=type,
                 executionTime=current_time,
                 name=name,
@@ -227,6 +254,7 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
 
         else:
             trace_instance = GenericTrace(
+                traceProvider=TraceProvider.LLAMA_INDEX,
                 type=type,
                 executionTime=current_time,
                 name=name,
@@ -242,7 +270,7 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
         trace_instance: BaseTrace,
         event_type: CBEventType,
         processed_payload: Optional[Dict[str, Any]] = None,
-    ) -> Union[EmbeddingTrace, LlmMetadata, GenericTrace]:
+    ) -> Union[EmbeddingTrace, LlmTrace, RetrieverTrace, GenericTrace]:
 
         trace_instance.executionTime = (
             perf_counter() - trace_instance.executionTime
@@ -255,10 +283,10 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
 
         elif event_type == CBEventType.LLM:
             trace_instance.output = processed_payload["output_value"]
-            trace_instance.llmMetadata.outputMessages = processed_payload[
+            trace_instance.llmMetadata.output_messages = processed_payload[
                 "llm_output_messages"
             ]
-            trace_instance.llmMetadata.tokenCount = {
+            trace_instance.llmMetadata.token_count = {
                 "prompt": processed_payload["llm_token_prompt_count"],
                 "completion": processed_payload["llm_token_count_completion"],
                 "total": processed_payload["llm_token_count_total"],
@@ -275,8 +303,22 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
             ]
             trace_instance.input = [t["embedding_text"] for t in embeddings]
 
+            # NOTE: dirty hack
+            trace_instance.embeddingMetadata.vector_length = len(
+                embeddings[0]["embedding_vector"]
+            )
+
         elif event_type == CBEventType.RETRIEVE:
             documents = processed_payload["retrieval_documents"]
+
+            total_chunk_length = 0
+            for document in documents:
+                total_chunk_length += len(document["document_content"])
+            trace_instance.retrieverMetadata.top_k = len(documents)
+            trace_instance.retrieverMetadata.average_chunk_size = (
+                total_chunk_length // len(documents)
+            )
+
             trace_instance.output = documents
 
         elif event_type == CBEventType.QUERY:
@@ -292,23 +334,23 @@ class LlamaIndexCallbackHandler(BaseCallbackHandler):
     ):
         # TODO: add more types
         if event_type == CBEventType.LLM:
-            return TraceType.LLM
+            return LlamaIndexTraceType.LLM
         elif event_type == CBEventType.RETRIEVE:
-            return TraceType.RETRIEVER
+            return LlamaIndexTraceType.RETRIEVER
         elif event_type == CBEventType.EMBEDDING:
-            return TraceType.EMBEDDING
+            return LlamaIndexTraceType.EMBEDDING
         elif event_type == CBEventType.CHUNKING:
-            return TraceType.CHUNKING
+            return LlamaIndexTraceType.CHUNKING
         elif event_type == CBEventType.NODE_PARSING:
-            return TraceType.NODE_PARSING
+            return LlamaIndexTraceType.NODE_PARSING
         elif event_type == CBEventType.SYNTHESIZE:
-            return TraceType.SYNTHESIZE
+            return LlamaIndexTraceType.SYNTHESIZE
         elif event_type == CBEventType.QUERY:
-            return TraceType.QUERY
+            return LlamaIndexTraceType.QUERY
         elif event_type == CBEventType.RERANKING:
-            return TraceType.RERANKING
+            return LlamaIndexTraceType.RERANKING
         elif event_type == CBEventType.AGENT_STEP:
-            return TraceType.AGENT_STEP
+            return LlamaIndexTraceType.AGENT_STEP
 
         return event_type.value.capitalize()
 
